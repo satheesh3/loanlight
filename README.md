@@ -61,7 +61,7 @@ Analyze the documents and produce a structured record for each borrower that inc
 
 ## 🚀 Submission Instructions
 
-Submit your work as a git repository (GitHub, GitLab, or similar) containing all deliverables. Email a link to the repo upon completion. 📧
+Fork this repository and submit your git repository containing all deliverables. Email a link to the repo upon completion. 📧
 
 ## 🎯 Next Steps
 
@@ -77,4 +77,4 @@ We encourage you to reach out with any questions. 🙋 Scope clarification is av
 
 ---
 
-*Good luck, and have fun building.* 🍀
+*Good luck, and have fun building, we appreciate your time and interest.* 🍀
