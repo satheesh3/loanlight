@@ -1,80 +1,140 @@
+# LoanLight
+
+Unstructured document extraction system for mortgage loan files. Extracts structured borrower PII, income history, and account records from heterogeneous PDFs using Claude AI, served via a REST API.
+
+## Architecture at a Glance
+
 ```
- _                          __  __           _
-| |    ___   __ _ _ __     |  \/  | __ _ ___| |_ ___ _ __
-| |   / _ \ / _` | '_ \    | |\/| |/ _` / __| __/ _ \ '__|
-| |__| (_) | (_| | | | |   | |  | | (_| \__ \ ||  __/ |
-|_____\___/ \__,_|_| |_|   |_|  |_|\__,_|___/\__\___|_|
+POST /ingestion/run
+  → upload PDFs to MinIO (S3)
+  → enqueue BullMQ jobs (Redis)
+      → workers call Claude API (base64 PDF → structured JSON)
+      → persist to PostgreSQL
+GET /loans/:id/borrowers  → borrowers + income history + source document refs
 ```
 
-# 🏠 Overview
-
-Build an unstructured data extraction system using a provided document corpus. You have **full autonomy** over the technology stack and implementation approach. 🧪
-
-We **heavily encourage** the use of bleeding-edge coding agents to develop the app — we want to review your *process* and your *understanding* of the system that gets generated. 🤖✨
-
-## ⏱️ Timeline
-
-- 📅 **Deadline:** 7 days from receipt
-- ⚡ **Expected effort:** 4–8 hours
-
-## 🧩 Problem Description
-
-The provided folder contains a corpus of documents with variable formatting, mixed file types, and structured data embedded within unstructured text. 📚 The goal is to design and implement a system that extracts meaningful, structured data from these documents.
-
-Your solution should include logic for parsing unstructured data **and** an API or interface to serve the processed data in a meaningful form. 🔌
-
-### 📄 Loan Documents
-
-Analyze the documents and produce a structured record for each borrower that includes extracted PII like:
-
-- 👤 Name
-- 🏡 Address
-- 💰 Full income history
-- 🔢 Associated account / loan numbers
-
-…with a clear reference 🔗 to the original document(s) from which each piece of information was sourced.
-
-## 📦 Deliverables
-
-### 1. 🏗️ System Design Document (Markdown)
-
-- 🗺️ Architecture overview, including component diagram
-- 🔄 Data pipeline design covering ingestion, processing, storage, and retrieval
-- 🧠 AI / LLM integration strategy and model selection rationale
-- 🎨 Approach for handling document format variability
-- 📈 Scaling considerations for **10x** and **100x** document volume
-- ⚖️ Key technical trade-offs and reasoning
-- 🛡️ Error handling strategy and data quality validation approach
-
-### 2. 🛠️ Working Implementation
-
-- 📥 Document ingestion pipeline
-- 🤖 Extraction logic using AI / LLM tooling
-- 🗂️ Structured output generation (e.g., JSON or database-backed)
-- 🔍 Basic query or retrieval interface
-- ✅ Test coverage for critical paths (encouraged but not required)
-
-### 3. 📖 README
-
-- 🏁 Setup and run instructions
-- 💡 Summary of architectural and implementation decisions
-
-## 🚀 Submission Instructions
-
-Fork this repository and submit your git repository containing all deliverables. Email a link to the repo upon completion. 📧
-
-## 🎯 Next Steps
-
-After submission, you can expect to participate in **three 45-minute** follow-up sessions:
-
-- 🧰 **Development Tooling Approach** — discussion of development environment and tooling approaches
-- 🏛️ **Systems Design Session** — walkthrough of design decisions and discussion of potential extensions
-- 🔬 **Code Review Session** — review of implementation details and technical choices
-
-## 💬 Questions
-
-We encourage you to reach out with any questions. 🙋 Scope clarification is available, but implementation decisions are intentionally left open-ended. 🎨
+**Stack:** NestJS · Sequelize · PostgreSQL · BullMQ · Redis · MinIO · Claude Sonnet 4.6
 
 ---
 
-*Good luck, and have fun building, we appreciate your time and interest.* 🍀
+## Setup & Run
+
+### Prerequisites
+
+- Docker + Docker Compose
+- Anthropic API key
+
+### 1. Configure environment
+
+```bash
+cp .env.example .env
+# set ANTHROPIC_API_KEY in .env
+```
+
+### 2. Start everything
+
+```bash
+docker compose up
+```
+
+This builds the API image and starts PostgreSQL, Redis, MinIO, and the API in one command.
+
+- API: `http://localhost:3000`
+- Queue dashboard: `http://localhost:3000/admin/queues`
+- MinIO console: `http://localhost:9001` (minioadmin / minioadmin)
+
+### 3. Run ingestion
+
+```bash
+# Ingest all loan folders
+curl -X POST http://localhost:3000/ingestion/run
+
+# Ingest a specific loan
+curl -X POST http://localhost:3000/ingestion/loans/214
+```
+
+The API returns immediately — extraction runs asynchronously. Watch progress at `/admin/queues`.
+
+### 4. Query results
+
+```bash
+# List all loans
+curl http://localhost:3000/loans
+
+# Get loan detail (export LOAN_ID from above)
+curl http://localhost:3000/loans/$LOAN_ID
+
+# Get all borrowers with income history and account records
+curl http://localhost:3000/loans/$LOAN_ID/borrowers
+
+# Get a specific borrower's income history with source doc refs
+curl http://localhost:3000/borrowers/$BORROWER_ID/income
+
+# List all documents and their extraction status
+curl http://localhost:3000/documents
+
+# Re-run extraction on a specific document
+curl -X POST http://localhost:3000/documents/$DOC_ID/re-extract
+```
+
+---
+
+## API Reference
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/ingestion/run` | Ingest all loan folders |
+| `POST` | `/ingestion/loans/:loanNumber` | Ingest a specific loan |
+| `GET` | `/loans` | List loans with status |
+| `GET` | `/loans/:id` | Loan detail with borrowers and documents |
+| `GET` | `/loans/:id/borrowers` | Borrowers with income + account records |
+| `GET` | `/borrowers/:id` | Full borrower profile |
+| `GET` | `/borrowers/:id/income` | Income history with source document references |
+| `GET` | `/documents` | List documents (filter: `?loanId=...`) |
+| `GET` | `/documents/:id` | Document detail + extraction events |
+| `POST` | `/documents/:id/re-extract` | Re-run Claude extraction |
+
+---
+
+## Running Tests
+
+```bash
+npm test
+```
+
+Covers:
+- **DocumentClassifierService** — all 10 document types from the corpus classified correctly
+- **ExtractionService** — JSON parsing, malformed response handling, markdown fence stripping, 429 retry logic
+
+---
+
+## Architectural Decisions
+
+### Why Claude Sonnet 4.6?
+- **200K token context** — entire loan file fits in one call; no chunking artifacts
+- **Native PDF input** — base64 document block handles both digital and scanned PDFs without separate OCR
+- **Structured output fidelity** — critical for financial figures; lower hallucination rate than alternatives
+- **PII discipline** — will not emit SSNs not present in source text
+
+### Why MinIO (not local filesystem)?
+Local development uses MinIO (S3-compatible, Docker). Workers download PDFs by `s3Key` — decoupled from any local path. Switching to AWS S3 in production requires only env var changes; zero code changes.
+
+### Why BullMQ (async queue)?
+`POST /ingestion/run` returns in ~1–2s regardless of how many documents are enqueued. Workers process concurrently (configurable via `EXTRACTION_CONCURRENCY`). Jobs survive app restarts. The Bull Board UI at `/admin/queues` gives real-time visibility into job states.
+
+### Source attribution
+Every `income_record` and `account_record` has a `documentId` FK pointing to the exact PDF it was extracted from, plus a `sourceSnippet` (verbatim text from Claude's extraction). This provides full audit trail for any extracted value.
+
+### No pdf-parse
+All PDFs go directly to Claude as base64 document blocks. This gives identical code paths for text-based and scanned PDFs, preserves table structure better than raw text extraction, and eliminates a dependency.
+
+---
+
+## Scaling
+
+See [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) for full architecture, scaling strategy (10x/100x), trade-offs, and error handling design.
+
+**Quick summary:**
+- **Today**: 3 concurrent workers, ~20–35s for 10 docs, non-blocking API
+- **10x**: raise `EXTRACTION_CONCURRENCY`, upgrade Anthropic tier
+- **100x**: horizontal worker pods, read replica, Anthropic Batch API, Redis cache
